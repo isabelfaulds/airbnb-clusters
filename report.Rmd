@@ -1,0 +1,176 @@
+---
+title: "What Kinds of Airbnbs Are There? Clustering Short-Term Rental Listings in San Diego"
+author: "Group 7: Esha Hooda, Isabel Faulds, Brian Pham"
+date: "MATH 167R, Fall 2026"
+output: word_document
+---
+
+```{r setup, include = FALSE}
+# run the whole analysis once; every number and figure below comes from analysis.R
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+invisible(capture.output(source("analysis.R")))
+
+# small helpers for writing numbers into the text
+fmt_p <- function(p) if (p < 0.001) "< 0.001" else paste("=", formatC(p, digits = 3, format = "f"))
+pct <- function(x) paste0(round(100 * x), "%")
+prof <- profiles
+
+# word tables: flextable sizes the columns to fit their contents
+library(flextable)
+make_table <- function(df, caption) {
+  # format each number on its own so 51.5 stays 51.5 and 1360 becomes 1,360
+  num <- sapply(df, is.numeric)
+  df[num] <- lapply(df[num], function(col) sapply(col, format, big.mark = ",", trim = TRUE))
+  ft <- flextable(df)
+  ft <- set_caption(ft, caption)
+  ft <- fontsize(ft, size = 9, part = "all")
+  ft <- padding(ft, padding.top = 1, padding.bottom = 1, part = "all")
+  ft <- line_spacing(ft, space = 1, part = "all")
+  ft <- align(ft, j = which(num), align = "right", part = "all")
+  autofit(ft)
+}
+```
+
+# 1. Introduction
+
+Airbnb sorts every listing into an official room type: entire home, private room, or shared room. Listings of the same type can still be run very differently. Some rent for a weekend at a time, some for a month, some are priced for luxury and sit empty most of the year. Our question is:
+
+**If San Diego listings are grouped only by how they are priced and booked, what natural types of Airbnbs emerge, and do those types match Airbnb's official room types?**
+
+To answer it we describe the data, test two simple hypotheses about superhosts, and then use cluster analysis (k-means, compared with probabilistic distance clustering) as our advanced technique.
+
+# 2. Data
+
+We used the San Diego, California listings file from the AirROI Data Portal. Each row is one listing, with its property details, host information, guest ratings, and booking performance over the last twelve months (TTM). The file contains a sample of `r n_listings` listings, all of which had at least one booked night in the last year, so all of them were kept.
+
+**Continuous variables:** average nightly rate, occupancy rate, average length of stay, average minimum nights, revenue, overall rating, number of reviews, bedrooms, maximum guests, and cleaning fee.
+
+**Categorical variables:** room type, superhost status, and Guest Favorite status (a badge Airbnb gives to highly rated listings).
+
+We left out two categorical variables on purpose. *Instant book* is missing for `r pct(mean(is.na(read.csv("data/san_diego_listings.csv", na.strings = c("", "NA"))$instant_book)))` of listings, and *professional management* is "False" for almost every listing, so neither carries useful information in this sample.
+
+# 3. Descriptive Statistics
+
+```{r desc-table}
+# compact version of table 1 so it fits the page: medians and iqr matter most for skewed data
+t1 <- desc_table[, c("n", "mean", "sd", "median", "iqr", "min", "max", "skew")]
+t1["Revenue, last 12 months (USD)", c("mean", "sd", "median", "iqr", "min", "max")] <-
+  t1["Revenue, last 12 months (USD)", c("mean", "sd", "median", "iqr", "min", "max")] / 1000
+# short labels so the table fits the page width
+rownames(t1) <- c("Rate (USD)", "Occupancy (%)", "Stay (nights)", "Min. nights",
+                  "Revenue (USD 1k)", "Rating", "Reviews", "Bedrooms", "Guests", "Cleaning fee (USD)")
+t1[] <- lapply(t1, function(col) signif(col, 3))
+t1 <- data.frame(Variable = rownames(t1), t1, check.names = FALSE)
+names(t1) <- c("Variable", "n", "Mean", "SD", "Median", "IQR", "Min", "Max", "Skew")
+make_table(t1, "Table 1. Summary statistics for the continuous variables. Rate = average nightly rate; Stay = average length of stay; Revenue is for the last 12 months.")
+```
+
+Most of the money and booking variables are strongly **right-skewed** (skewness above 1): a few listings charge far more, stay far longer, or have far more reviews than the rest. For these variables the mean is pulled up by the extremes, so the **median and interquartile range** describe a typical listing better. For example, the mean nightly rate is \$`r round(desc_table["Nightly rate (USD)", "mean"])`, but the median is only \$`r round(desc_table["Nightly rate (USD)", "median"])`. The cleaning fee shows the same problem in an extreme form: the median is \$`r round(desc_table["Cleaning fee (USD)", "median"])`, but a handful of monthly rentals charge over \$3,000, which pushes the mean to \$`r round(desc_table["Cleaning fee (USD)", "mean"])`.
+
+Occupancy is the exception. It is spread fairly evenly from almost empty to almost always booked (median `r desc_table["Occupancy (%)", "median"]`%, skewness `r desc_table["Occupancy (%)", "skew"]`). Ratings are packed into a narrow band near the top of the scale (median `r desc_table["Overall rating (1-5)", "median"]` out of 5), so ratings barely separate good listings from bad ones.
+
+```{r fig1, fig.cap = "Figure 1. Histograms and normal Q-Q plots for nightly rate, occupancy, average stay, and overall rating.", out.width = "100%"}
+knitr::include_graphics("figures/fig1_hist_qq.png")
+```
+
+The Q-Q plots in Figure 1 confirm what the skewness values suggest. Nightly rate and average stay curve sharply away from the line at the top, which is the signature of a long right tail. Occupancy bends at both ends because it is bounded between 0% and 100%. Ratings bend because they are capped at 5. **None of the main variables is close to normal**, so we use rank-based (nonparametric) tests in Section 4 and log-transform the skewed variables before clustering in Section 5.
+
+```{r fig2, fig.cap = "Figure 2. Listings by room type, superhost status, and Guest Favorite status.", out.width = "85%"}
+knitr::include_graphics("figures/fig2_categorical.png")
+```
+
+The sample is dominated by entire homes (`r freq_tables$room_type$n[1]` of `r n_listings` listings), with only `r freq_tables$room_type$n[2]` private rooms and `r freq_tables$room_type$n[3]` shared room. This matters for our question: if Airbnb's room types were the main way listings differ, almost every listing would fall into one group. `r freq_tables$superhost$percent[2]`% of listings are run by superhosts, and `r freq_tables$guest_favorite$percent[2]`% have the Guest Favorite badge.
+
+Spearman correlations (which use ranks, so they are not distorted by the skew) show that more expensive listings tend to have **lower** occupancy (ρ = `r cor_matrix["ttm_avg_rate", "occupancy_pct"]`), and that listings with longer average stays also have higher minimum-night requirements (ρ = `r cor_matrix["ttm_avg_length_of_stay", "ttm_avg_min_nights"]`).
+
+# 4. Hypothesis Tests
+
+All tests use a significance level of **α = 0.05**.
+
+## 4.1 Do superhosts have higher occupancy?
+
+- **H₀:** Occupancy has the same distribution for superhosts and non-superhosts.
+- **H₁:** Occupancy differs between superhosts and non-superhosts (two-sided).
+
+We first checked normality in each group with the Shapiro–Wilk test. Both groups depart from normality (p `r fmt_p(occ_test$shapiro_p[1])` for non-superhosts and p `r fmt_p(occ_test$shapiro_p[2])` for superhosts), so instead of a t-test we used the **`r occ_test$test`**, which compares the groups by ranks and does not assume normality.
+
+```{r fig3, fig.cap = "Figure 3. Occupancy for non-superhosts and superhosts. Each dot is one listing.", out.width = "60%"}
+knitr::include_graphics("figures/fig3_occupancy_superhost.png")
+```
+
+**Result:** W = `r occ_test$statistic`, p `r fmt_p(occ_test$p_value)`, so we **`r occ_test$decision`**. The median occupancy for superhosts is `r round(occ_test$median[2], 1)`%, compared with `r round(occ_test$median[1], 1)`% for other hosts. In plain words, superhost listings are booked on about two and a half times as many nights. The test cannot tell us *why*. Superhost status may attract guests, or busy listings may simply find it easier to meet Airbnb's superhost requirements.
+
+## 4.2 Is superhost status related to the Guest Favorite badge?
+
+- **H₀:** Superhost status and Guest Favorite status are independent.
+- **H₁:** The two are associated.
+
+Every expected count in the 2 × 2 table is at least 5, so the **`r badge_test$test`** is appropriate.
+
+```{r badge-table}
+t2 <- as.data.frame.matrix(badge_test$table)
+t2 <- data.frame(` ` = rownames(t2), t2, check.names = FALSE)
+make_table(t2, "Table 2. Superhost status by Guest Favorite status (listings with missing badge information excluded).")
+```
+
+**Result:** χ² = `r round(badge_test$statistic, 2)` with `r badge_test$df` degree of freedom, p `r fmt_p(badge_test$p_value)`, so we **`r badge_test$decision`**. `r pct(badge_test$table[2, 2] / sum(badge_test$table[2, ]))` of superhosts have the Guest Favorite badge, compared with only `r pct(badge_test$table[1, 2] / sum(badge_test$table[1, ]))` of other hosts. The two recognitions tend to go together, which makes sense because both reward consistently good guest experiences.
+
+# 5. Cluster Analysis
+
+## 5.1 Method
+
+We clustered listings on three variables that describe how a listing is priced and booked: **nightly rate, occupancy, and average length of stay.** Rate and stay length were log-transformed because of their strong right skew (Section 3). All three variables were then standardized (mean 0, standard deviation 1) so that each contributes equally to the distance between listings. Without this step, nightly rate, measured in hundreds of dollars, would dominate occupancy, which is a proportion between 0 and 1.
+
+We ran **k-means** for k = 2 to 6 clusters, with 100 random starts for each k so the result does not depend on one unlucky starting point. To choose k we used the **elbow method** (where adding another cluster stops reducing the within-cluster sum of squares much) and the **average silhouette width** (how much closer each listing is to its own cluster than to the next nearest one, on a scale from −1 to 1).
+
+```{r fig4, fig.cap = "Figure 4. Choosing the number of clusters. Left: within-cluster sum of squares. Right: average silhouette width.", out.width = "100%"}
+knitr::include_graphics("figures/fig4_choose_k.png")
+```
+
+Both methods point to **k = `r best_k`**. The within-cluster sum of squares drops sharply from 2 to 3 clusters and only slowly after that, and the silhouette width peaks at k = `r best_k` (`r round(sil_kmeans, 2)`). A silhouette of about 0.4 indicates **moderate** structure: the groups are real, but their edges overlap.
+
+As a check, we also clustered the same standardized data with **probabilistic distance clustering (PD-clustering)**, using the `PDC()` function from the `FPDclustering` package. Instead of assigning each listing to exactly one cluster, PD-clustering gives each listing a probability of belonging to each cluster, based on its distances to the cluster centers.
+
+## 5.2 Results
+
+```{r profile-table}
+prof_show <- data.frame(
+  Cluster = prof$cluster,
+  n = prof$n,
+  `Rate (USD)` = round(prof$ttm_avg_rate),
+  `Occ. (%)` = round(prof$occupancy_pct, 1),
+  `Stay` = prof$ttm_avg_length_of_stay,
+  `Min. nights` = prof$ttm_avg_min_nights,
+  Reviews = round(prof$num_reviews),
+  `Superhost (%)` = prof$pct_superhost,
+  `Entire home (%)` = prof$pct_entire_home,
+  check.names = FALSE)
+make_table(prof_show, "Table 3. Median profile of each k-means cluster, numbered from cheapest to most expensive. Rate = nightly rate, Occ. = occupancy, Stay = average stay in nights.")
+```
+
+```{r fig5, fig.cap = "Figure 5. Clusters by nightly rate and occupancy (left) and by average stay and nightly rate (right). Axes on log scales.", fig.show = "hold", out.width = "49%"}
+knitr::include_graphics(c("figures/fig5a_clusters_price_occupancy.png",
+                          "figures/fig5b_clusters_stay_price.png"))
+```
+
+The three clusters describe three clearly different kinds of listing:
+
+1. **Cluster 1: budget monthly rentals** (`r prof$n[1]` listings). The cheapest group, at a median of \$`r round(prof$ttm_avg_rate[1])` a night, with a median stay of `r prof$ttm_avg_length_of_stay[1]` nights and a minimum stay of about `r round(prof$ttm_avg_min_nights[1])` nights. These listings work more like furnished monthly housing than vacation rentals. `r cluster_by_room[1, 2] + cluster_by_room[1, 3]` of the `r sum(cluster_by_room[, 2:3])` private and shared rooms in the sample fall in this cluster.
+2. **Cluster 2: popular short stays** (`r prof$n[2]` listings). Mid-priced (\$`r round(prof$ttm_avg_rate[2])`), short visits (`r prof$ttm_avg_length_of_stay[2]` nights), and by far the busiest, with a median occupancy of `r prof$occupancy_pct[2]`% and about `r round(prof$num_reviews[2])` reviews each. `r prof$pct_superhost[2]`% of these hosts are superhosts. These are the classic, successful vacation rentals.
+3. **Cluster 3: expensive, rarely booked homes** (`r prof$n[3]` listings). The most expensive group (\$`r round(prof$ttm_avg_rate[3])` a night) but booked only `r prof$occupancy_pct[3]`% of the time, with few reviews. All of them are entire homes, and `r coastal_share[3]`% are in the coastal western part of the city (Figure 6).
+
+```{r fig6, fig.cap = "Figure 6. Listing locations colored by cluster.", out.width = "48%"}
+knitr::include_graphics("figures/fig6_cluster_map.png")
+```
+
+**Do the clusters match Airbnb's room types?** Mostly not. Clusters 2 and 3 are almost entirely entire homes, yet they behave in opposite ways: one is cheap and busy, the other expensive and mostly empty. The official room type cannot tell these two apart, while pricing and booking behavior can.
+
+**Are the clusters related to superhost status?** Yes. A `r cluster_superhost_test$test` of cluster against superhost status gives p `r fmt_p(cluster_superhost_test$p_value)`. Superhosts make up `r prof$pct_superhost[2]`% of the popular short-stay cluster but only `r prof$pct_superhost[3]`% of the expensive, rarely booked cluster, which agrees with the occupancy result in Section 4.1.
+
+**Do k-means and PD-clustering agree?** Largely. The adjusted Rand index between the two solutions is `r round(agreement_ari, 2)` (1 would mean identical clusterings and 0 would mean agreement no better than chance). Both methods find the same three types; they mainly disagree about listings that sit between clusters. PD-clustering has a slightly lower silhouette (`r round(sil_pdc, 2)` vs. `r round(sil_kmeans, 2)`), and for `r pct(uncertain_share)` of listings no single cluster gets a probability above 0.5. This confirms what the silhouette suggested: the three types are real, but many listings are in-between cases rather than clear members of one group.
+
+# 6. Conclusion
+
+Grouping San Diego Airbnb listings by price, occupancy, and length of stay reveals three types: **budget monthly rentals, popular short stays, and expensive homes that are rarely booked.** These types cut across Airbnb's official room types. Most listings are "entire homes," but entire homes split into a busy, mid-priced group and an expensive, mostly empty group concentrated near the coast. Superhosts have significantly higher occupancy, are much more likely to be Guest Favorites, and are concentrated in the popular short-stay cluster.
+
+**Limitations.** The data is a sample of `r n_listings` listings, not every listing in San Diego, so the cluster sizes and percentages should be read as estimates. The cluster structure is moderate (silhouette about 0.4), and PD-clustering shows that many listings sit between types. Finally, the hypothesis tests show association, not cause: we cannot say whether superhost status brings bookings or bookings bring superhost status. A natural next step would be to repeat the analysis on the full San Diego dataset and add variables such as neighborhood and amenities.
