@@ -1,0 +1,12 @@
+Exploratory Spearman correlation: nightly price and occupancy
+H0: population Spearman rho >= 0. H1: population Spearman rho < 0.
+Included listings: 100; excluded: 0.
+Spearman rho: -0.2940
+One-sided p-value (negative association): 0.00149423
+Two-sided p-value: 0.00298846
+Method: asymptotic Spearman test (ties present); alpha = 0.05.
+Reject H0 at alpha = 0.05: evidence of a negative association.
+Exploratory: the direction was chosen after earlier inspection of these data.
+Assumes independent listings; shared hosts may violate independence.
+Population generalization depends on the sampling design of these 100 listings.
+Association does not establish that changing price causes occupancy to change.
