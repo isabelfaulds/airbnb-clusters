@@ -17,7 +17,9 @@
 - [add or edit]
 
 ## Brian Pham
-- [add what Brian did, e.g. descriptive statistics and graphs, cluster interpretation, report editing]
+- Added a test to see whether clusters differ in rating or number of reviews.
+- Merged prs in GitHub
+- Drafted the project report
 
 ## Shared work
 - All three members discussed the choice of clustering variables and the number of clusters, and reviewed the final report.

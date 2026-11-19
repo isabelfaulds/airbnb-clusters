@@ -150,7 +150,7 @@ uncertain_share <- mean(d$pd_max_prob < 0.5)   # listings with no clear "home" c
 
 # what does a typical listing in each cluster look like? (medians)
 profile_vars <- c("ttm_avg_rate", "occupancy_pct", "ttm_avg_length_of_stay",
-                  "ttm_avg_min_nights", "num_reviews", "bedrooms")
+                  "ttm_avg_min_nights", "num_reviews", "rating_overall", "bedrooms")
 profiles <- cluster_profile(d, d$cluster, profile_vars)
 superhost_share <- tapply(d$superhost == "Superhost", d$cluster, mean)
 profiles$pct_superhost <- round(100 * superhost_share, 0)
@@ -163,6 +163,12 @@ cluster_by_room <- table(Cluster = d$cluster, `Room type` = d$room_type)
 # is cluster membership related to being a superhost? (links clusters to a categorical variable)
 # H0: cluster and superhost status are independent, alpha = 0.05
 cluster_superhost_test <- test_association(d$cluster, d$superhost)
+
+# do the clusters differ on variables that were NOT used to build them? (reviews vs ratings)
+# H0: the variable has the same distribution in every cluster, alpha = 0.05
+# H1: at least one cluster has a different distribution
+rating_test <- kruskal.test(rating_overall ~ cluster, data = d)
+reviews_test <- kruskal.test(num_reviews ~ cluster, data = d)
 
 # figure 5: clusters in price vs occupancy, and price vs stay length
 cluster_cols <- c("1" = "#1b9e77", "2" = "#d95f02", "3" = "#7570b3",
@@ -210,5 +216,7 @@ cat("\nk-means vs pd-clustering adjusted rand index:", round(agreement_ari, 2), 
 cat("silhouette k-means:", round(sil_kmeans, 2), " pd-clustering:", round(sil_pdc, 2), "\n")
 cat("cluster vs superhost:", cluster_superhost_test$test, " p =",
     signif(cluster_superhost_test$p_value, 3), "\n")
+cat("cluster vs rating: Kruskal-Wallis p =", signif(rating_test$p.value, 3), "\n")
+cat("cluster vs number of reviews: Kruskal-Wallis p =", signif(reviews_test$p.value, 3), "\n")
 cat("percent of each cluster on the coast (west of -117.22):", coastal_share, "\n")
 cat("listings with no clear pd-cluster (max probability < 0.5):", round(100 * uncertain_share), "%\n")
