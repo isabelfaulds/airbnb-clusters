@@ -69,7 +69,7 @@ Most of the money and booking variables are strongly **right-skewed** (skewness 
 
 Occupancy is the exception. It is spread fairly evenly from almost empty to almost always booked (median `r desc_table["Occupancy (%)", "median"]`%, skewness `r desc_table["Occupancy (%)", "skew"]`). Ratings are packed into a narrow band near the top of the scale (median `r desc_table["Overall rating (1-5)", "median"]` out of 5), so ratings barely separate good listings from bad ones.
 
-```{r fig1, fig.cap = "Figure 1. Histograms and normal Q-Q plots for nightly rate, occupancy, average stay, and overall rating.", out.width = "100%"}
+```{r fig1, fig.cap = "Figure 1. Histograms and normal Q-Q plots for nightly rate, occupancy, average stay, and overall rating.", out.width = "90%"}
 knitr::include_graphics("figures/fig1_hist_qq.png")
 ```
 
@@ -81,7 +81,7 @@ knitr::include_graphics("figures/fig2_categorical.png")
 
 The sample is dominated by entire homes (`r freq_tables$room_type$n[1]` of `r n_listings` listings), with only `r freq_tables$room_type$n[2]` private rooms and `r freq_tables$room_type$n[3]` shared room. This matters for our question: if Airbnb's room types were the main way listings differ, almost every listing would fall into one group. `r freq_tables$superhost$percent[2]`% of listings are run by superhosts, and `r freq_tables$guest_favorite$percent[2]`% have the Guest Favorite badge.
 
-Spearman correlations (which use ranks, so they are not distorted by the skew) show that more expensive listings tend to have **lower** occupancy (ρ = `r cor_matrix["ttm_avg_rate", "occupancy_pct"]`), and that listings with longer average stays also have higher minimum-night requirements (ρ = `r cor_matrix["ttm_avg_length_of_stay", "ttm_avg_min_nights"]`).
+Spearman correlations (which use ranks, so they are not distorted by the skew) show that more expensive listings tend to have **lower** occupancy (ρ = `r cor_matrix["ttm_avg_rate", "occupancy_pct"]`, two-sided p `r fmt_p(cor.test(d$ttm_avg_rate, d$occupancy_pct, method = "spearman", exact = FALSE)$p.value)`), and that listings with longer average stays also have higher minimum-night requirements (ρ = `r cor_matrix["ttm_avg_length_of_stay", "ttm_avg_min_nights"]`).
 
 # 4. Hypothesis Tests
 
@@ -123,7 +123,7 @@ We clustered listings on three variables that describe how a listing is priced a
 
 We ran **k-means** for k = 2 to 6 clusters, with 100 random starts for each k so the result does not depend on one unlucky starting point. To choose k we used the **elbow method** (where adding another cluster stops reducing the within-cluster sum of squares much) and the **average silhouette width** (how much closer each listing is to its own cluster than to the next nearest one, on a scale from −1 to 1).
 
-```{r fig4, fig.cap = "Figure 4. Choosing the number of clusters. Left: within-cluster sum of squares. Right: average silhouette width.", out.width = "100%"}
+```{r fig4, fig.cap = "Figure 4. Choosing the number of clusters. Left: within-cluster sum of squares. Right: average silhouette width.", out.width = "80%"}
 knitr::include_graphics("figures/fig4_choose_k.png")
 ```
 
@@ -167,7 +167,7 @@ knitr::include_graphics("figures/fig6_cluster_map.png")
 
 **Are the clusters related to superhost status?** Yes. A `r cluster_superhost_test$test` of cluster against superhost status gives p `r fmt_p(cluster_superhost_test$p_value)`. Superhosts make up `r prof$pct_superhost[2]`% of the popular short-stay cluster but only `r prof$pct_superhost[3]`% of the expensive, rarely booked cluster, which agrees with the occupancy result in Section 4.1.
 
-**Do the clusters differ in ratings or number of reviews since they were not built on these variables? ** There is a strong correlation between review clusters and not so much for ratins clusters. Ratings are almost all high so there is little deviance, we fail to reject H0. Reviews differ more, but listings that get booked more often get more reviews, so the difference is not surprising, we reject H0. A `r rating_test$method` of rating against cluster gives p `r fmt_p(rating_test$p.value)`, and a `r reviews_test$method` of number of reviews against cluster gives p `r fmt_p(reviews_test$p.value)`.
+**Do the clusters differ on variables that were not used to build them?** We tested overall rating and number of reviews with Kruskal–Wallis tests (H₀: the variable has the same distribution in every cluster; α = 0.05). For ratings, p `r fmt_p(rating_test$p.value)`, so we fail to reject H₀: ratings are almost all near 5 in every cluster, so they cannot separate the groups. For number of reviews, p `r fmt_p(reviews_test$p.value)`, so we reject H₀: the popular short-stay cluster has far more reviews (median `r round(prof$num_reviews[2])`) than the other two. This is expected, because listings that are booked more often collect more reviews, but it confirms that the clusters reflect real differences in how much each listing is used.
 
 **Do k-means and PD-clustering agree?** Largely. The adjusted Rand index between the two solutions is `r round(agreement_ari, 2)` (1 would mean identical clusterings and 0 would mean agreement no better than chance). Both methods find the same three types; they mainly disagree about listings that sit between clusters. PD-clustering has a slightly lower silhouette (`r round(sil_pdc, 2)` vs. `r round(sil_kmeans, 2)`), and for `r pct(uncertain_share)` of listings no single cluster gets a probability above 0.5. This confirms what the silhouette suggested: the three types are real, but many listings are in-between cases rather than clear members of one group.
 
